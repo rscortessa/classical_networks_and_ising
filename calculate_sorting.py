@@ -6,7 +6,7 @@
 
 
 import os
-
+import argparse
 # 1. Restrict threads BEFORE importing netket/jax/numpy
 os.environ["OMP_NUM_THREADS"] = "2" # Example: Restrict to 2 threads per node
 os.environ["OPENBLAS_NUM_THREADS"] = "2"
@@ -114,19 +114,34 @@ def sweeps(exact, psi, sorting, hwt, nstates, hi, past_inf,candidates, parity=Tr
     return infs, order
 
 # Initial parameters ....
+parser = argparse.ArgumentParser()
 
-L = 10
-hi = nk.hilbert.Spin(s=1/2,N=L,inverted_ordering=True)
-gi = 1.5
-gf = 0.5
-angle=0.0
-candidates=1
+parser.add_argument("--L", type=int, default=12)
+parser.add_argument("--candidates", type=int, default=10)
+parser.add_argument("--gi", type=float, default=1.5)
+parser.add_argument("--gf", type=float, default=0.5)
+parser.add_argument("--angle", type=float, default=0.0)
+parser.add_argument("--t_start", type=float, default=0.0)
+parser.add_argument("--t_idx", type=int, default=60)
+
+args_list=None
+args, _ = parser.parse_known_args(args_list)
+params = vars(args)
+
+
+
 eps = 1e-16
-
-t_start = 0.0
 dt = 0.01
 Ndt = 100
-t_idx = 60
+
+t_idx = params["t_idx"]
+L = params["L"]
+gi = params["gi"]
+gf = params["gf"]
+angle= params["angle"]
+t_start = params["t_start"]
+candidates=params["candidates"]
+hi = nk.hilbert.Spin(s=1/2,N=L,inverted_ordering=True)
 
 output_dir = "wavefunctions_data"
 os.makedirs(output_dir, exist_ok=True)
@@ -148,6 +163,7 @@ exact = np.abs(psi_t_idx)
 psi = exact.copy()
 past_inf = 0.0
 inf_exact,order_exact = sweeps(exact, psi, bare_sorting, log_WHT.real,2**L,hi,past_inf,candidates, parity=True)
+
 
 print(inf_exact.shape,order_exact.shape)
 base_name_inf = f"inf_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}candidates{candidates}Nt{Ndt}.npy"
