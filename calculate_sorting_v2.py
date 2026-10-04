@@ -47,19 +47,28 @@ def Fast_Hadamard(a):
 
     return a
 
-def single_sweep(exact,mask,past_inf,hwt,idx_arr,nstates):
+    
+def single_sweep(exact,psi,mask,past_inf,hwt,idx_arr,nstates,continuous):
 
+    a = exact * psi
+    Csquare_a = Fast_Hadamard(a)
     Csquare = Fast_Hadamard(exact**2)
+
+    A_plus = (1+nstates*Csquare_a[mask])/2.0
+    A_minus = (1-nstates*Csquare_a[mask])/2.0
     B_plus = (1+nstates*Csquare[mask])/2.0
     B_minus = (1-nstates*Csquare[mask])/2.0
 
-    square_overlaps = B_plus*np.exp(-hwt[mask])+B_minus*np.exp(hwt[mask])
+    square_overlaps = A_plus*np.exp(-hwt[mask])+A_minus*np.exp(hwt[mask])
     norm_square = B_plus*np.exp(-2 * hwt[mask])+B_minus*np.exp(2 * hwt[mask])
 
     infs = 1 - square_overlaps**2/norm_square
 
-    
-    idx_inf = np.argmin(np.abs(past_inf-infs),axis=-1)
+    if not continuous:
+        idx_inf = np.argmin((infs),axis=-1)
+    else:
+        idx_inf = np.argmin(np.abs(past_inf-infs),axis=-1)
+        
     min_inf = infs[idx_inf]
     global_idxs_inf = idx_arr[mask][idx_inf]
 
@@ -69,14 +78,14 @@ def single_sweep(exact,mask,past_inf,hwt,idx_arr,nstates):
     np.put_along_axis(aux, id_coeff_expanded, -vals, axis=-1)
     np.put_along_axis(mask, id_coeff_expanded, False, axis=-1)
     
-    new_exact = exact * np.exp(Fast_Hadamard(aux) * nstates)
-    new_exact = new_exact / np.linalg.norm(new_exact)
+    new_psi = psi * np.exp(Fast_Hadamard(aux) * nstates)
+    new_psi = new_psi / np.linalg.norm(new_psi,axis=-1)
 
     
-    return new_exact,mask,min_inf,idx_inf
+    return new_psi,mask,min_inf,idx_inf
 
 
-def sweeps(exact, hwt, initial_mask,nstates, hi, past_inf):
+def sweeps(exact, hwt, initial_mask,nstates, hi, past_inf,continuous=False):
     batch_dims = exact.shape[:-1]
     infs = np.ones_like(hwt[initial_mask], dtype=float)
     order = np.ones_like(hwt[initial_mask])
@@ -89,7 +98,7 @@ def sweeps(exact, hwt, initial_mask,nstates, hi, past_inf):
     idx_arr = np.broadcast_to(indices, leading_shape)
     
     for kk in range(int(nstates/2)):
-        new_psi, new_mask, new_inf, idx_inf = single_sweep(psi,mask,past_inf, hwt,idx_arr,nstates)
+        new_psi, new_mask, new_inf, idx_inf = single_sweep(exact,psi,mask,past_inf, hwt,idx_arr,nstates,continuous)
         infs[..., kk] = new_inf
         order[..., kk] = idx_inf
         
@@ -108,7 +117,7 @@ parser.add_argument("--gi", type=float, default=1.5)
 parser.add_argument("--gf", type=float, default=0.5)
 parser.add_argument("--angle", type=float, default=0.0)
 parser.add_argument("--t_start", type=float, default=0.0)
-parser.add_argument("--t_idx", type=int, default=60)
+parser.add_argument("--t_idx", type=int, default=10)
 
 args_list=None
 args, _ = parser.parse_known_args(args_list)
@@ -127,6 +136,7 @@ gf = params["gf"]
 angle= params["angle"]
 t_start = params["t_start"]
 candidates=params["candidates"]
+
 hi = nk.hilbert.Spin(s=1/2,N=L,inverted_ordering=True)
 
 output_dir = "wavefunctions_data"
@@ -143,39 +153,45 @@ psi_history = np.lib.format.open_memmap(
 psi_t_idx = psi_history[t_idx]
 print(psi_t_idx.shape)
 
-log_WHT = Fast_Hadamard(np.log(psi_t_idx))
-exact = np.abs(psi_t_idx)
-initial_mask = np.arange(2**L,dtype=int) % 2 == 0
-past_inf = 0.0
 
-inf_exact,order_exact = sweeps(exact,log_WHT.real,initial_mask,2**L,hi,past_inf)
+continuous_list=[False,True]
 
+for continuous in continuous_list:
 
-print(inf_exact.shape,order_exact.shape)
-base_name_inf = f"inf_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}.npy"
-filename_inf = os.path.join(output_dir, base_name_inf)
-psi_inf = np.lib.format.open_memmap(
+    log_WHT = Fast_Hadamard(np.log(psi_t_idx))
+    exact = np.abs(psi_t_idx)
+    initial_mask = np.arange(2**L,dtype=int) % 2 == 0
+    past_inf = 0.0
+
+    inf_exact,order_exact = sweeps(exact,log_WHT.real,initial_mask,2**L,hi,past_inf,continuous)
+
+    print(inf_exact.shape,order_exact.shape)
+    base_name_inf = f"inf_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}C{continuous}.npy"
+    filename_inf = os.path.join(output_dir, base_name_inf)
+    psi_inf = np.lib.format.open_memmap(
         filename_inf, 
         mode='w+', 
         dtype=np.complex128, 
         shape=(2**(L-1),)
-)
-psi_inf[:] = inf_exact[::-1]
+    )
+    psi_inf[:] = inf_exact[::-1]
 
-base_name_sort = f"sort_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}.npy"
-filename_sort = os.path.join(output_dir, base_name_sort)
-psi_sort = np.lib.format.open_memmap(
+    base_name_sort = f"sort_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}C{continuous}.npy"
+    filename_sort = os.path.join(output_dir, base_name_sort)
+    psi_sort = np.lib.format.open_memmap(
         filename_sort, 
         mode='w+', 
         dtype=int, 
         shape=(2**(L-1),)
-)
-psi_sort[:] = order_exact[::-1]
+    )
+    psi_sort[:] = order_exact[::-1]
 
 
-psi_sort.flush()
-psi_inf.flush()
+    psi_sort.flush()
+    psi_inf.flush()
+    del psi_sort
+    del psi_inf
+
 psi_history.flush()
 del psi_history
-del psi_sort
-del psi_inf
+
