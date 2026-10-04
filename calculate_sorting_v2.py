@@ -56,7 +56,7 @@ def single_sweep(exact,mask,past_inf,hwt,idx_arr,nstates):
     square_overlaps = B_plus*np.exp(-hwt[mask])+B_minus*np.exp(hwt[mask])
     norm_square = B_plus*np.exp(-2 * hwt[mask])+B_minus*np.exp(2 * hwt[mask])
 
-    infs = 1 - square_overlaps/norm_square
+    infs = 1 - square_overlaps**2/norm_square
 
     
     idx_inf = np.argmin(np.abs(past_inf-infs),axis=-1)
