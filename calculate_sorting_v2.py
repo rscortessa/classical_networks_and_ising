@@ -51,11 +51,14 @@ def Fast_Hadamard(a):
 def single_sweep(exact,psi,mask,past_inf,hwt,idx_arr,nstates,continuous):
 
     a = exact * psi
+    sum_a = np.sum(a,axis=-1)
+    
     Csquare_a = Fast_Hadamard(a)
-    Csquare = Fast_Hadamard(exact**2)
-
-    A_plus = (1+nstates*Csquare_a[mask])/2.0
-    A_minus = (1-nstates*Csquare_a[mask])/2.0
+    Csquare = Fast_Hadamard(psi**2)
+    
+    
+    A_plus = (sum_a+nstates*Csquare_a[mask])/2.0
+    A_minus = (sum_a-nstates*Csquare_a[mask])/2.0
     B_plus = (1+nstates*Csquare[mask])/2.0
     B_minus = (1-nstates*Csquare[mask])/2.0
 
@@ -82,7 +85,7 @@ def single_sweep(exact,psi,mask,past_inf,hwt,idx_arr,nstates,continuous):
     new_psi = new_psi / np.linalg.norm(new_psi,axis=-1)
 
     
-    return new_psi,mask,min_inf,idx_inf
+    return new_psi,mask,min_inf,global_idxs_inf
 
 
 def sweeps(exact, hwt, initial_mask,nstates, hi, past_inf,continuous=False):
