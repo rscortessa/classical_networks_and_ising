@@ -53,7 +53,7 @@ def single_sweep(a,c_square_psi,wht_log_psi,mask,past_inf,idx_arr,nstates,contin
 
     all_idx = np.arange(nstates)
     sum_a = a[0] * nstates
-      
+    sum_b = c_square_psi[0] * nstates
     
     A_plus = (sum_a+nstates*a[mask])/2.0
     A_minus = (sum_a-nstates*a[mask])/2.0
@@ -90,8 +90,11 @@ def single_sweep(a,c_square_psi,wht_log_psi,mask,past_inf,idx_arr,nstates,contin
     perm = all_idx^global_idxs_inf
 
     a = ch * a -sh * a[perm]
-    c_square_psi = ch2 * c_square_psi -sh * c_square_psi[perm]
-    
+    c_square_psi = ch2 * c_square_psi -sh2 * c_square_psi[perm]
+
+    Z_sq = c_square_psi[0]
+    c_square_psi /= Z_sq
+    a /= np.sqrt(Z_sq)
     
     return a,c_square_psi,wht_log_psi,mask,min_inf,global_idxs_inf
 
@@ -115,7 +118,7 @@ def sweeps(target_psi,psi,initial_mask,nstates, hi, past_inf,continuous=False):
 
     
     for kk in range(int(nstates/2)):
-        new_a,new_c_square_psi,updated_wht_log_psi,new_mask, new_inf, idx_inf = single_sweep(a,c_square_psi,wht_log_psi,mask,past_inf,idx_arr,nstates,continuous)
+        new_a,new_c_square_psi,updated_wht_log_psi,new_mask, new_inf, idx_inf = single_sweep(a,c_square_psi,wht_log_psi,mask,past_inf,idx_arr,nstates,continuous=continuous)
 
         infs[..., kk] = new_inf
         order[..., kk] = idx_inf
