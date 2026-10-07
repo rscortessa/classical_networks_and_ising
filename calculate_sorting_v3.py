@@ -57,8 +57,8 @@ def single_sweep(a,c_square_psi,wht_log_psi,mask,past_inf,idx_arr,nstates,contin
     
     A_plus = (sum_a+nstates*a[mask])/2.0
     A_minus = (sum_a-nstates*a[mask])/2.0
-    B_plus = (c_square_psi[0]+nstates*c_square_psi[mask])/2.0
-    B_minus = (c_square_psi[0]-nstates*c_square_psi[mask])/2.0
+    B_plus = (sum_b+nstates*c_square_psi[mask])/2.0
+    B_minus = (sum_b-nstates*c_square_psi[mask])/2.0
 
     square_overlaps = A_plus*np.exp(-wht_log_psi[mask])+A_minus*np.exp(wht_log_psi[mask])
     norm_square = B_plus*np.exp(-2 * wht_log_psi[mask])+B_minus*np.exp(2 * wht_log_psi[mask])
@@ -92,7 +92,7 @@ def single_sweep(a,c_square_psi,wht_log_psi,mask,past_inf,idx_arr,nstates,contin
     a = ch * a -sh * a[perm]
     c_square_psi = ch2 * c_square_psi -sh2 * c_square_psi[perm]
 
-    Z_sq = c_square_psi[0]
+    Z_sq = c_square_psi[0] * nstates
     c_square_psi /= Z_sq
     a /= np.sqrt(Z_sq)
     
@@ -134,7 +134,7 @@ def sweeps(target_psi,psi,initial_mask,nstates, hi, past_inf,continuous=False):
 # Initial parameters ....
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--L", type=int, default=14)
+parser.add_argument("--L", type=int, default=16)
 parser.add_argument("--candidates", type=int, default=10)
 parser.add_argument("--gi", type=float, default=1.5)
 parser.add_argument("--gf", type=float, default=0.5)
@@ -159,10 +159,13 @@ gf = params["gf"]
 angle= params["angle"]
 t_start = params["t_start"]
 candidates=params["candidates"]
-
+pbc=False
 hi = nk.hilbert.Spin(s=1/2,N=L,inverted_ordering=True)
-
-output_dir = "wavefunctions_data"
+add=""
+if pbc:
+    add+="_pbc"
+    
+output_dir = "wavefunctions_data"+add
 os.makedirs(output_dir, exist_ok=True)
 
 base_name = f"wavefunctions_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}Nt{Ndt}.npy"
@@ -185,7 +188,7 @@ for continuous in continuous_list:
     exact = np.abs(psi_t_idx)
     initial_mask = np.arange(2**L,dtype=int) % 2 == 0
     past_inf = 0.0
-    inf_exact,order_exact = sweeps(exact,exact,initial_mask,2**L, hi, past_inf,continuous=False)
+    inf_exact,order_exact = sweeps(exact,exact,initial_mask,2**L, hi, past_inf,continuous=continuous)
    
     print(inf_exact.shape,order_exact.shape)
     base_name_inf = f"inf_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}C{continuous}.npy"

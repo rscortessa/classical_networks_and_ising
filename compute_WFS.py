@@ -57,7 +57,7 @@ def Fast_Hadamard(a):
     return a
 
 
-L = 10
+L = 22
 gi = 1.5
 gf = 0.5
 angle=0.0
@@ -69,9 +69,9 @@ dt = 0.01
 Ndt = 100
 
 
-
+pbc=True
 hi = nk.hilbert.Spin(s=1/2,N=L,inverted_ordering=True)
-H_in = rotated_IsingModel(angle*np.pi/180,gi,L,hi)
+H_in = rotated_IsingModel(angle*np.pi/180,gi,L,hi,pbc=pbc)
 H_in = H_in.to_sparse()
 E,psi = eigsh(H_in, k=1, which='SA')
 GS = np.log(psi[:,0]+1e-14+1j*1e-14)
@@ -91,14 +91,16 @@ else:
 
 
 #We need to built psi_t:
-
+add=""
+if pbc:
+    add+="_pbc"
 time = t_start+np.arange(Ndt+1)*dt
-output_dir = "wavefunctions_data"
+output_dir = "wavefunctions_data"+add
 os.makedirs(output_dir, exist_ok=True)
 
 
 # 1. Get the Hamiltonian as a sparse matrix (do NOT use to_dense())
-H_out = rotated_IsingModel(angle*np.pi/180, gf, L, hi).to_sparse()
+H_out = rotated_IsingModel(angle*np.pi/180, gf, L, hi,pbc=pbc).to_sparse()
 
 
 psi_in  = psi_initial.copy()
