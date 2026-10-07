@@ -91,9 +91,9 @@ def single_sweep(exact,psi,mask,past_inf,hwt,idx_arr,nstates,continuous):
 def sweeps(exact, hwt, initial_mask,nstates, hi, past_inf,continuous=False):
     batch_dims = exact.shape[:-1]
     infs = np.ones_like(hwt[initial_mask], dtype=float)
-    order = np.ones_like(hwt[initial_mask])
+    order = np.ones_like(hwt[initial_mask],dtype=int)
 
-    mask = initial_mask
+    mask = initial_mask.copy()
     psi = exact
     
     indices = np.arange(nstates)
@@ -114,7 +114,7 @@ def sweeps(exact, hwt, initial_mask,nstates, hi, past_inf,continuous=False):
 # Initial parameters ....
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--L", type=int, default=12)
+parser.add_argument("--L", type=int, default=14)
 parser.add_argument("--candidates", type=int, default=10)
 parser.add_argument("--gi", type=float, default=1.5)
 parser.add_argument("--gf", type=float, default=0.5)
