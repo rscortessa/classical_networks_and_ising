@@ -58,9 +58,9 @@ def Fast_Hadamard(a):
 
 
 L = 22
-gi = 1.5
-gf = 0.5
-angle=0.0
+gi = 0.0
+gf = 1.0
+angle=90.0
 
 eps = 1e-16
 
@@ -79,12 +79,7 @@ psi_initial = psi[:,0]
 
 
 if angle == 90.0:
-    # 1. Summing booleans is orders of magnitude faster than np.prod on floats.
-    # 2. An even number of negative spins guarantees the product is 1.
-    available_states = (hi.all_states() < 0).sum(axis=-1) % 2 == 0
-else:
-    # Directly allocate a boolean array. This uses 8x less RAM and is instantaneous.
-    available_states = np.ones(2**L, dtype=bool)
+    psi_initial = np.ones(2**L)/np.sqrt(2**L)
 
 
 # Here,we quantify the entire evolution...
@@ -94,6 +89,9 @@ else:
 add=""
 if pbc:
     add+="_pbc"
+if angle != 0.0:
+    add+="_"+str(angle)
+    
 time = t_start+np.arange(Ndt+1)*dt
 output_dir = "wavefunctions_data"+add
 os.makedirs(output_dir, exist_ok=True)

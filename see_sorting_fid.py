@@ -10,7 +10,7 @@ angle = 0.0
 t_start = 0.0
 dt = 0.01
 Ndt = 100
-ts = [5,10,15, 20,25, 30,35, 40,45, 50, 60, 70, 80, 90]
+ts = [5,10,15, 20,25, 30,35, 40,45,46,47,48,49 ,50, 51,52,53,54,55,60,65, 70,76, 80,85, 90,95]
 candidates=100
 # Calculate the physical time step t
 
@@ -26,7 +26,7 @@ for t_idx in ts:
     #plt.yscale('log')
     plt.ylim([1e-11,1.1])
     plt.xlabel(r'$n_c/L$')
-    #plt.xlim([0,2.1])
+    plt.xlim([0,5])
     plt.ylabel('fidelity')
     plt.title(f'fidelity vs Parameters | $g_i$={gi}, $g_f$={gf}, angle={angle}, t={t:.2f}')
     plt.grid(True, which="both", linestyle="--", alpha=0.6)
