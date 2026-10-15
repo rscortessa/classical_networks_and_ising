@@ -159,11 +159,19 @@ gf = params["gf"]
 angle= params["angle"]
 t_start = params["t_start"]
 candidates=params["candidates"]
-pbc=False
+pbc=True
 hi = nk.hilbert.Spin(s=1/2,N=L,inverted_ordering=True)
 add=""
 if pbc:
     add+="_pbc"
+if angle != 0.0:
+    add+="_"+str(angle)
+    initial_mask  = np.ones(2**L,dtype=int)
+else:
+    initial_mask = np.arange(2**L,dtype=int) % 2 == 0
+
+len_mask = np.sum(initial_mask)
+
     
 output_dir = "wavefunctions_data"+add
 os.makedirs(output_dir, exist_ok=True)
@@ -186,7 +194,7 @@ for continuous in continuous_list:
 
     log_WHT = Fast_Hadamard(np.log(psi_t_idx))
     exact = np.abs(psi_t_idx)
-    initial_mask = np.arange(2**L,dtype=int) % 2 == 0
+    
     past_inf = 0.0
     inf_exact,order_exact = sweeps(exact,exact,initial_mask,2**L, hi, past_inf,continuous=continuous)
    
@@ -197,7 +205,7 @@ for continuous in continuous_list:
         filename_inf, 
         mode='w+', 
         dtype=np.complex128, 
-        shape=(2**(L-1),)
+        shape=(len_mask,)
     )
     psi_inf[:] = inf_exact[::-1]
 
@@ -207,7 +215,7 @@ for continuous in continuous_list:
         filename_sort, 
         mode='w+', 
         dtype=int, 
-        shape=(2**(L-1),)
+        shape=(len_mask,)
     )
     psi_sort[:] = order_exact[::-1]
 
