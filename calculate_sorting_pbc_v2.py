@@ -159,37 +159,6 @@ def deleting_group(a, c_square_psi, wht_log_psi, idxs_group, mask, nstates):
     return infs, a, c_square_psi, wht_log_psi, mask
 
 
-def group_sweep_1(a, c_square_psi, wht_log_psi, mask, idx_groups, past_inf, nstates, continuous):
-    best_score = np.inf
-    best_inf = np.inf
-    
-    # Pre-allocate references for the winner only
-    best_a, best_c, best_wht, best_mask = None, None, None, None
-    best_idx_inf = -1
-    
-    # Simulate deleting each available group
-    for i, idxs_group in enumerate(idx_groups):
-        inf, new_a, new_c, new_wht, new_mask = deleting_group(
-            a, c_square_psi, wht_log_psi, idxs_group, mask, nstates
-        )
-
-        # Calculate the comparison score based on the mode
-        score = np.abs(past_inf - inf) if continuous else inf
-        
-        # If this group is better, overwrite the "best" tracked arrays
-        if score < best_score:
-            best_score = score
-            best_inf = inf
-            best_a = new_a
-            best_c = new_c
-            best_wht = new_wht
-            best_mask = new_mask
-            best_idx_inf = i
-
-    # Retrieve and remove the winning group from the available list
-    chosen_group = idx_groups.pop(best_idx_inf)
-    
-    return best_inf, best_a, best_c, best_wht, best_mask, idx_groups, chosen_group
 
 
 
@@ -224,39 +193,81 @@ def group_sweep(a, c_square_psi, wht_log_psi, mask, idx_groups, past_inf, nstate
     
     return best_inf, best_a, best_c, best_wht, best_mask, idx_groups, chosen_group
 
-def sweeps(target_psi, psi, initial_mask, nstates, hi, past_inf, L,idx_groups,ngroups,continuous=False):
-    # Ensure boolean masking for initial_mask
-    states = hi.all_states()[initial_mask.astype(bool)]
+
+def sweeps(target_psi, psi, initial_mask, nstates, hi, past_inf, L, idx_groups, ngroups, continuous=False):
     batch_dims = target_psi.shape[:-1]
 
-    
     a = Fast_Hadamard(target_psi * psi)
     c_square_psi = Fast_Hadamard(psi**2)
     wht_log_psi = Fast_Hadamard(np.log(psi))
     
+    # =========================================================================
+    # THE UPGRADE: Precompute the exponent matrices for ALL groups once.
+    # This takes ~0.5 seconds and replaces millions of loops with BLAS matrix math.
+    # =========================================================================
+    print("Precomputing exponent matrices for all groups...")
+    exp_minus_E = np.zeros((ngroups, nstates), dtype=float)
+    exp_minus_2E = np.zeros((ngroups, nstates), dtype=float)
+    
+    for i, idxs_group in enumerate(idx_groups):
+        V = np.zeros(nstates, dtype=wht_log_psi.dtype)
+        for g in idxs_group:
+            V[g] = wht_log_psi[g]
+            
+        E = Fast_Hadamard(V) * nstates
+        exp_minus_E[i] = np.exp(-E)
+        exp_minus_2E[i] = np.exp(-2 * E)
+        
     infs = np.ones(batch_dims + (ngroups,), dtype=float)
     order = np.ones(batch_dims + (ngroups,), dtype=int)
 
     mask = initial_mask.copy()
     
+    # Use a boolean mask instead of .pop() so our indices align with the precomputed matrices
+    active_mask = np.ones(ngroups, dtype=bool)
     
     # Sweep exactly ngroups times
     for kk in range(ngroups):
-        new_inf, new_a, new_c_square_psi, updated_wht_log_psi, new_mask, idx_groups, chosen_group = group_sweep(
-            a, c_square_psi, wht_log_psi, mask, idx_groups, past_inf, nstates, continuous=continuous
-        )
-
-        infs[..., kk] = new_inf
-        order[..., kk] = chosen_group[0]  # Store just the representative index
+        # 1. Recover current real-space arrays once per sweep step
+        A_real = Fast_Hadamard(a) * nstates
+        C_real = Fast_Hadamard(c_square_psi) * nstates
         
-        a = new_a
-        c_square_psi = new_c_square_psi
-        wht_log_psi = updated_wht_log_psi
-        past_inf = new_inf
-        mask = new_mask
+        # 2. SIMULTANEOUS EVALUATION: Matrix-vector dot product evaluates all 686 groups instantly
+        sum_a_0 = np.dot(exp_minus_E, A_real)
+        sum_c_0 = np.dot(exp_minus_2E, C_real)
+        
+        overlap_sq = (sum_a_0 * nstates)**2
+        norm_sq = sum_c_0 * nstates
+        
+        group_infs = 1.0 - (overlap_sq / norm_sq)
+        
+        # Mask out groups that have already been deleted
+        group_infs = np.where(active_mask, group_infs, np.inf)
+        
+        # 3. Find the best candidate
+        if not continuous:
+            best_idx = np.argmin(group_infs, axis=-1)
+        else:
+            diff = np.abs(past_inf - group_infs)
+            diff = np.where(active_mask, diff, np.inf)
+            best_idx = np.argmin(diff, axis=-1)
+            
+        best_inf = group_infs[best_idx]
+        chosen_group = idx_groups[best_idx]
+        
+        # Mark this group as deleted for future sweeps
+        active_mask[best_idx] = False
+        
+        # 4. Apply the exact full O(2^L) update only for the winning group
+        _, a, c_square_psi, wht_log_psi, mask = deleting_group(
+            a, c_square_psi, wht_log_psi, chosen_group, mask, nstates
+        )
+        
+        infs[..., kk] = best_inf
+        order[..., kk] = chosen_group[0] 
+        past_inf = best_inf
         
     return infs, order
-
 
 # Initial parameters ....
 if __name__ == "__main__":
@@ -330,15 +341,15 @@ if __name__ == "__main__":
     dense_groups_local = np.load(local_filename)
     dense_groups_global = np.load(global_filename)
 
-    ngroups = len(dense_groups_global)
-
-    # Since your algorithm uses `idx_groups.pop()`, convert the dense array back to a list of lists 
-    # while filtering out the -1 padding:
-    idx_groups = [g[g != -1].tolist() for g in dense_groups_global]
-
-
     
     for continuous in continuous_list:
+
+        ngroups = len(dense_groups_global)
+        
+        # Since your algorithm uses `idx_groups.pop()`, convert the dense array back to a list of lists 
+        # while filtering out the -1 padding:
+        idx_groups = [g[g != -1].tolist() for g in dense_groups_global]
+
         exact = np.abs(psi_t_idx)
         
         past_inf = 0.0
