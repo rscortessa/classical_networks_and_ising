@@ -110,6 +110,86 @@ def sweeps(target_psi, psi, nstates, hi, past_inf, L, idx_groups, ngroups, conti
         past_inf = best_inf
 
     return infs, order
+
+def sweeps(target_psi, psi, nstates, hi, past_inf, L, idx_groups, ngroups, continuous=False):
+    batch_dims = target_psi.shape[:-1]
+
+    # Ensure initial wavefunctions are strictly normalized in real space
+    target_psi = target_psi / np.sqrt(np.sum(target_psi ** 2))
+    psi = psi / np.sqrt(np.sum(psi ** 2))
+
+    # We only need the WHT once to precompute the exponent matrices
+    wht_log_psi = Fast_Hadamard(np.log(psi))
+
+    print("Precomputing exponent matrices for all groups...")
+    exp_minus_E = np.zeros((ngroups, nstates), dtype=float)
+    exp_minus_2E = np.zeros((ngroups, nstates), dtype=float)
+
+    for i, idxs_group in enumerate(idx_groups):
+        V = np.zeros(nstates, dtype=wht_log_psi.dtype)
+        for g in idxs_group:
+            # Optional safeguard: if g == 0 is in a group, its WHT value is just the global norm offset.
+            # Keeping it or setting V[0] = 0 prevents exp(-E) from blowing up numerically.
+            if g != 0:
+                V[g] = wht_log_psi[g]
+
+        E = Fast_Hadamard(V) * nstates
+        # Subtract the mean of E to prevent exponential overflow/underflow; 
+        # a constant shift in E cancels out in (overlap_sq / norm_sq)
+        E_shifted = E - np.mean(E)
+        exp_minus_E[i] = np.exp(-E_shifted)
+        exp_minus_2E[i] = np.exp(-2 * E_shifted)
+
+    infs = np.ones(batch_dims + (ngroups,), dtype=float)
+    order = np.ones(batch_dims + (ngroups,), dtype=int)
+
+    active_mask = np.ones(ngroups, dtype=bool)
+    global_idx_array_group = np.arange(0, ngroups, dtype=int)
+    
+    # Maintain the state directly in real space
+    current_psi = psi.copy()
+
+    # Sweep exactly ngroups times
+    for kk in range(ngroups):
+        # 1. A_real and C_real are calculated instantly in real space
+        A_real = target_psi * current_psi
+        C_real = current_psi ** 2
+
+        # 2. SIMULTANEOUS EVALUATION: Evaluate all active groups instantly
+        sum_a_0 = np.dot(exp_minus_E[active_mask], A_real)
+        sum_c_0 = np.dot(exp_minus_2E[active_mask], C_real)
+
+        overlap_sq = sum_a_0 ** 2
+        norm_sq = sum_c_0
+
+        # Since target_psi is normalized, 1 - overlap_sq / norm_sq is exact
+        group_infs = 1.0 - (overlap_sq / norm_sq)
+
+        # 3. Find the best candidate among active groups
+        if not continuous:
+            best_idx = np.argmin(group_infs, axis=-1)
+        else:
+            diff = np.abs(past_inf - group_infs)
+            best_idx = np.argmin(diff, axis=-1)
+
+        # Map local best_idx to global group index FIRST
+        global_idx_group = global_idx_array_group[active_mask][best_idx]
+        chosen_group = idx_groups[global_idx_group]
+        best_inf = group_infs[best_idx]
+
+        # 4. Apply the exact multi-state update using the GLOBAL index
+        current_psi = current_psi * exp_minus_E[global_idx_group]
+        # Renormalize current_psi at each step to prevent floating-point drift
+        current_psi /= np.sqrt(np.sum(current_psi ** 2))
+
+        active_mask[global_idx_group] = False
+
+        infs[..., kk] = best_inf
+        order[..., kk] = chosen_group[0]
+        past_inf = best_inf
+
+    return infs, order
+
 # Initial parameters ....
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
