@@ -15,7 +15,6 @@ def group_equivalent_states(L, hi, states, pad_to_dense=True):
     
     lookup = np.full(hi.n_states, -1, dtype=int)
     lookup[batch_global_indices] = np.arange(len(states))
-    
     visited = np.zeros(len(states), dtype=bool)
     
     groups_local = []
@@ -25,15 +24,15 @@ def group_equivalent_states(L, hi, states, pad_to_dense=True):
         if visited[idx]:
             continue
             
-        symm_states = np.empty((2 * L, L))
+        symm_states = np.empty((L, L))
         for shift in range(L):
             rolled = np.roll(state, shift)
             symm_states[shift] = rolled
-            symm_states[L + shift] = rolled[::-1] 
-            
+        #print(symm_states)
         symm_global_all = np.unique(hi.states_to_numbers(symm_states))
+        #print(symm_global_all)
         symm_local_all = lookup[symm_global_all]
-        
+        #print(symm_local_all)
         valid_mask = symm_local_all != -1
         symm_local = symm_local_all[valid_mask]
         symm_global = symm_global_all[valid_mask]
@@ -60,7 +59,7 @@ def group_equivalent_states(L, hi, states, pad_to_dense=True):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--L", type=int, default=14)
+    parser.add_argument("--L", type=int, default=6)
     parser.add_argument("--angle", type=float, default=0.0)
     args, _ = parser.parse_known_args()
     pbc=True
@@ -78,24 +77,30 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
 
     # Mirror the initial_mask logic from your main script
+    init_states = hi.all_states()[1:]
     if angle != 0.0:
         initial_mask = np.ones(2**L, dtype=bool)
     else:
-        initial_mask = (np.arange(2**L, dtype=int) % 2 == 0)
+        initial_mask = np.prod(init_states,axis=-1) > 0.0 
 
-    states = hi.all_states()[initial_mask]
+    states = init_states[initial_mask]
     
     print(f"Generating groups for L={L}, number of valid states={len(states)}...")
     
     # Must use pad_to_dense=True to save as a standard numpy array
     dense_local, dense_global = group_equivalent_states(L, hi, states, pad_to_dense=True)
-    
+    #print(dense_local)
+    #print(dense_local[1])
+    #print(dense_global[:,:15])
     local_filename = f"groups_local_L{L}_a{angle}.npy"
     global_filename = f"groups_global_L{L}_a{angle}.npy"
 
     filename_local = os.path.join(output_dir,local_filename)
     filename_global = os.path.join(output_dir,global_filename)
+
     
+    #np.savetxt(filename_local,dense_local,delimiter=",",fmt="%d")
+    #np.savetxt(filename_global,dense_global,delimiter=",",fmt="%d")
     np.save(filename_local, dense_local)
     np.save(filename_global, dense_global)
     
