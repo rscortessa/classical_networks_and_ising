@@ -3,20 +3,29 @@ import matplotlib.pyplot as plt
 import os
 
 # Parameters as defined in calculate_sorting.py
-Ls = [8, 10, 12, 14, 16, 18, 20]
-gi = 1.5
-gf = 0.5
-angle = 0.0
+Ls = [8, 10, 12, 14, 16]
+gi = 0.0
+gf = 1.0
+angle = 90.0
 t_start = 0.0
 dt = 0.01
 Ndt = 100
-ts = [5,10,15, 20,25, 30,35, 40,45,46,47,48,49 ,50, 51,52,53,54,55,60,65, 70,76, 80,85, 90,95]
+ts = [5,10,15, 20,25, 30,35, 40,45,46,47,48,49 ,50, 51,52,53,54,55,60,65,75, 80,85, 90,95]
 candidates=100
 # Calculate the physical time step t
-
+pbc=True
 
 # Reconstruct the file path used in calculate_sorting.py
-output_dir = "wavefunctions_data"
+add=""
+if pbc:
+    add+="_pbc"
+if angle != 0.0:
+    add+="_"+str(angle)
+    
+time = t_start+np.arange(Ndt+1)*dt
+output_dir = "wavefunctions_data"+add
+os.makedirs(output_dir, exist_ok=True)
+
 two_sortings = [True]
 
 # Formatting the plots
@@ -26,7 +35,7 @@ for t_idx in ts:
     #plt.yscale('log')
     plt.ylim([1e-11,1.1])
     plt.xlabel(r'$n_c/L$')
-    plt.xlim([0,5])
+    #plt.xlim([0,5])
     plt.ylabel('fidelity')
     plt.title(f'fidelity vs Parameters | $g_i$={gi}, $g_f$={gf}, angle={angle}, t={t:.2f}')
     plt.grid(True, which="both", linestyle="--", alpha=0.6)
