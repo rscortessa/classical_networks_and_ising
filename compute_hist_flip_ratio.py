@@ -1,5 +1,4 @@
-#!/usr/bin/env python                                                                                                                                                                                                                       
-# coding: utf-8                                                                                                                                                                                                                             
+#!/usr/bin/env python                                                                                                                                                                                                                    
 
 import os
 
@@ -22,7 +21,7 @@ gi = 1.5
 gf = 0.5
 angle = 0.0
 i = 2
-eps = 1e-16
+eps = 1e-10
 
 t_start = 0.0
 dt = 0.01
@@ -54,25 +53,32 @@ for idx_L, L in enumerate(Ls):
         shape=(Ndt + 1, 2**L)
     )
 
-    log_flip_filename = os.path.join(output_dir,f"logflip_L{L}_gi{gi:.2f}_gf{gf:.2f}.npy")
+    log_flip_filename = os.path.join(output_dir, f"logflip_L{L}_gi{gi:.2f}_gf{gf:.2f}.npy")
+    
+    # FIX 1: Pass log_flip_filename instead of filename
     log_flip_ratio_file = np.lib.format.open_memmap(
-        filename,
+        log_flip_filename,
         mode='w+',
-        dtype=float,
-        shape=(Ndt+1,2**L)
+        dtype=np.float64, # explicitly using numpy float64 
+        shape=(Ndt+1, 2**L)
     )
 
     for idx_t in range(Ndt + 1):
         # Calculate flip ratio
-        numerator = np.abs(psi_history[idx_t, single_flip_numbers])
-        denominator = np.abs(psi_history[idx_t]) + eps
-        flip_ratio_i = numerator / denominator
+        numerator = np.log(np.abs(psi_history[idx_t, single_flip_numbers])+eps)
+        
+        denominator = np.log(np.abs(psi_history[idx_t]) + eps)
 
-        # Consider log of flip_ratio_i (filter out zeros or negative values to avoid -inf)
-        valid_ratios = flip_ratio_i[flip_ratio_i > 0]
-        log_flip_ratio = np.log(valid_ratios)
+        flip_ratio_i = numerator - denominator
+        flip_ratio_i [flip_ratio_i > 16] = 15
+        flip_ratio_i [flip_ratio_i < -16] = -15
 
-        log_flip_ratio_file[idx_t]  = np.log(flip_ratio_i) 
+        log_flip_ratio = flip_ratio_i
+        flip_ratio_i = np.exp(flip_ratio_i)
+        
+
+        # FIX 2: Add eps to flip_ratio_i to avoid RuntimeWarnings & -inf when storing back to mmap
+        log_flip_ratio_file[idx_t] = log_flip_ratio
         
         # Compute histogram of log(flip_ratio_i)
         counts, bin_edges = np.histogram(log_flip_ratio, bins=100, density=True)
@@ -100,7 +106,7 @@ for idx_L, L in enumerate(Ls):
         plt.close()
 
     log_flip_ratio_file.flush()
-    psi_history.flush()
+    # No need to flush psi_history since it's loaded in 'r' (read-only) mode
     del psi_history
     del log_flip_ratio_file
     print("Completed histograms for L =", L)
