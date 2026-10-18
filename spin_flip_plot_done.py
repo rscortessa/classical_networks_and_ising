@@ -55,9 +55,17 @@ plt.title(r"$\langle |\Psi(\vec{\sigma}^{(1))},t)/\Psi(\vec{\sigma}^{(0))},t)| \
 plt.xlabel("time(t)",fontsize=fontsize)
 for idx_L,L in enumerate(Ls):
     plt.plot(time,flip_array[idx_L],label=str(L))
-    plt.plot(time,singularities_array[idx_L],label=str(L))
 plt.legend(fontsize=fontsize)
 flip_plot = os.path.join(output_dir,"spin_flip_gi"+str(gi)+"_gf"+str(gf)+".png")
+plt.savefig(flip_plot)
+
+plt.figure()
+plt.title(r"$\langle |\Psi(\vec{\sigma}^{(1))},t)/\Psi(\vec{\sigma}^{(0))},t)| \rangle \;,\;\sigma_i^{(1)}=-\sigma_i^{(0)}$",fontsize=fontsize)
+plt.xlabel("time(t)",fontsize=fontsize)
+for idx_L,L in enumerate(Ls):
+    plt.plot(time,singularities_array[idx_L],label=str(L))
+plt.legend(fontsize=fontsize)
+flip_plot = os.path.join(output_dir,"singularities_gi"+str(gi)+"_gf"+str(gf)+".png")
 plt.savefig(flip_plot)
 
 
