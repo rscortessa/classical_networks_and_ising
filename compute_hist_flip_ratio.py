@@ -54,6 +54,7 @@ for idx_L, L in enumerate(Ls):
     )
 
     log_flip_filename = os.path.join(output_dir, f"logflip_L{L}_gi{gi:.2f}_gf{gf:.2f}.npy")
+    singularities_filename = os.path.join(output_dir, f"singularities_L{L}_gi{gi:.2f}_gf{gf:.2f}.npy")
     
     # FIX 1: Pass log_flip_filename instead of filename
     log_flip_ratio_file = np.lib.format.open_memmap(
@@ -62,23 +63,27 @@ for idx_L, L in enumerate(Ls):
         dtype=np.float64, # explicitly using numpy float64 
         shape=(Ndt+1, 2**L)
     )
+    N_singularities = np.lib.format.open_memmap(
+        singularities_filename,
+        mode='w+',
+        dtype=np.float64, # explicitly using numpy float64 
+        shape=(Ndt+1,)
+    )
 
     for idx_t in range(Ndt + 1):
-        # Calculate flip ratio
-        numerator = np.log(np.abs(psi_history[idx_t, single_flip_numbers])+eps)
-        
-        denominator = np.log(np.abs(psi_history[idx_t]) + eps)
+        # Calculate flip ratio        
+        numerator = np.abs(psi_history[idx_t, single_flip_numbers])
+        denominator = np.abs(psi_history[idx_t])
 
-        flip_ratio_i = numerator - denominator
-        flip_ratio_i [flip_ratio_i > 16] = 15
-        flip_ratio_i [flip_ratio_i < -16] = -15
-
-        log_flip_ratio = flip_ratio_i
-        flip_ratio_i = np.exp(flip_ratio_i)
-        
-
+        flip_ratio_i = numerator/denominator
         # FIX 2: Add eps to flip_ratio_i to avoid RuntimeWarnings & -inf when storing back to mmap
+        log_flip_ratio = np.log(flip_ratio_i)
+        mask = np.isfinite(log_flip_ratio)
+
         log_flip_ratio_file[idx_t] = log_flip_ratio
+        N_singularities[idx_t] = np.sum(mask != True)/2**L
+        
+        log_flip_ratio = log_flip_ratio[mask]
         
         # Compute histogram of log(flip_ratio_i)
         counts, bin_edges = np.histogram(log_flip_ratio, bins=100, density=True)
@@ -105,8 +110,10 @@ for idx_L, L in enumerate(Ls):
         plt.savefig(plot_filename, dpi=300)
         plt.close()
 
+    N_singularities.flush()
     log_flip_ratio_file.flush()
     # No need to flush psi_history since it's loaded in 'r' (read-only) mode
     del psi_history
     del log_flip_ratio_file
+    del N_singularities
     print("Completed histograms for L =", L)
