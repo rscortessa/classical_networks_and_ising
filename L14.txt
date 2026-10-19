@@ -1,0 +1,5 @@
+(65536,)
+(32768,) (32768,)
+(65536,)
+(32768,) (32768,)
+Plot saved successfully to: wavefunctions_data/plot_inf_compare_candidates_L16gi1.50gf0.50t60.png
