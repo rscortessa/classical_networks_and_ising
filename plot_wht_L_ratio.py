@@ -89,7 +89,7 @@ if __name__ == "__main__":
 
     # Create a 2-panel plot (one for Continuous=False, one for Continuous=True)
     fig, axes = plt.subplots(1, 1, figsize=(8, 6), sharey=True)
-    colors = cm.viridis(np.arange(0,len(Ls)))
+    colors = cm.tab10(np.linspace(0,1,len(Ls)))
     ax = axes
     continuous= True
     
@@ -152,6 +152,8 @@ if __name__ == "__main__":
     ax.grid(True, which="both", ls="--", alpha=0.4)
     ax.legend(fontsize=8, ncol=2)
     ax.set_xlim(-0.2,10)
+
+    ax.axhline(y=1/gi,linestyle="dashed")
     
     fig.suptitle(rf"Ratio "+r"$|\frac{C_{i+1}}{C_{i}}|\cdot \frac{n_{i+1}}{n_{i}}$"+"\n"+rf" $( g_i={gi:.2f}, g_f={gf:.2f},t={t_idx*0.01:.2f})$", fontsize=13)
     plt.tight_layout()
