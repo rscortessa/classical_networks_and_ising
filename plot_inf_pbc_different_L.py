@@ -30,8 +30,10 @@ def main():
     continuous_list = [True,False]
     for continuous in continuous_list:
         for t_idx in t:
+        
             plt.figure(figsize=(10, 6))
             for L in Ls:
+            
                 # 1. Load the groups to figure out the size of each group
                 global_filename = os.path.join(output_dir, f"groups_global_L{L}_a{args.angle}.npy")
                 if not os.path.exists(global_filename):
@@ -66,24 +68,20 @@ def main():
                 # (They were saved as inf_exact[::-1] and order_exact[::-1] in the main script)
                 infs = np.load(inf_file)
                 order = np.load(sort_file)
-                #print(order[0],"first")
-                #print("order",order)
-                #print(infs)
+                
                 # 3. Reconstruct the x-axis (cumulative sum of removed coefficients)
                 # order array contains the representative index of each removed group
-                group_sizes = [rep_to_size[rep] for rep in order]
-                #print(group_sizes)
-                x_cumulative_removed = np.cumsum(group_sizes)
-                #print(x_cumulative_removed)
+                group_sizes = [1]+[rep_to_size[rep] for rep in order]
+                x_cumulative_removed = np.cumsum(group_sizes)[:-1]
+                
                 # 4. Plot
                 plt.plot(x_cumulative_removed/L, infs, marker='.', markersize=4, label=f'{L}')
 
-            plt.xlabel("Number of Coefficients Removed")
+            plt.xlabel(r"$n_c$")
             plt.ylabel("Infidelity")
-            plt.ylim([1e-8,1])
-            #plt.xlim([0,10])
+            plt.ylim([1e-10,1])
             plt.yscale("log")
-            plt.title(f"Infidelity vs Removed Coefficients (t={t_idx*0.01} gi={args.gi}, gf={args.gf})")
+            plt.title(r"$I(n_c)$ "+rf"(t={t_idx*0.01:.2f} gi={args.gi}, gf={args.gf})")
             plt.yscale("log") # Infidelity usually drops logarithmically, so a log scale is helpful
             plt.grid(True, which="both", ls="--", alpha=0.5)
             plt.legend()
