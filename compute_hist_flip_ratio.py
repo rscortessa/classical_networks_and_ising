@@ -1,5 +1,4 @@
-#!/usr/bin/env python                                                                                                                                                                                                                    
-
+#!/usr/bin/env python                       
 import os
 
 # 1. Restrict threads BEFORE importing netket/jax/numpy                                                                                                                                                                                     
@@ -16,21 +15,28 @@ import matplotlib.pyplot as plt
 import sys
 sys.path.append("../netket_with_NQS")
 
-Ls = [8, 10, 12, 14, 16, 18, 20, 22]
+Ls = [8, 10, 12, 14, 16, 18, 20]
 gi = 1.5
 gf = 0.5
 angle = 0.0
 i = 2
-eps = 1e-10
 
 t_start = 0.0
 dt = 0.01
 Ndt = 100
-
+eps=1e-14
 pbc = True
 add = "_pbc" if pbc else ""
 output_dir = "wavefunctions_data" + add
 os.makedirs(output_dir, exist_ok=True)
+
+singularities_filename = os.path.join(output_dir, f"singularities_gi{gi:.2f}_gf{gf:.2f}eps{eps=}.npy")
+N_singularities = np.lib.format.open_memmap(
+     singularities_filename,
+     mode='w+',
+     dtype=np.float64, 
+     shape=(len(Ls),Ndt+1,)
+    )
 
 for idx_L, L in enumerate(Ls):
     hi = nk.hilbert.Spin(s=1/2, N=L, inverted_ordering=True)
@@ -54,66 +60,102 @@ for idx_L, L in enumerate(Ls):
     )
 
     log_flip_filename = os.path.join(output_dir, f"logflip_L{L}_gi{gi:.2f}_gf{gf:.2f}.npy")
-    singularities_filename = os.path.join(output_dir, f"singularities_L{L}_gi{gi:.2f}_gf{gf:.2f}.npy")
     
-    # FIX 1: Pass log_flip_filename instead of filename
+    
     log_flip_ratio_file = np.lib.format.open_memmap(
         log_flip_filename,
         mode='w+',
-        dtype=np.float64, # explicitly using numpy float64 
+        dtype=np.float64, 
         shape=(Ndt+1, 2**L)
     )
-    N_singularities = np.lib.format.open_memmap(
-        singularities_filename,
-        mode='w+',
-        dtype=np.float64, # explicitly using numpy float64 
-        shape=(Ndt+1,)
-    )
+    
+   
 
     for idx_t in range(Ndt + 1):
-        # Calculate flip ratio        
         numerator = np.abs(psi_history[idx_t, single_flip_numbers])
         denominator = np.abs(psi_history[idx_t])
-
-        flip_ratio_i = numerator/denominator
-        # FIX 2: Add eps to flip_ratio_i to avoid RuntimeWarnings & -inf when storing back to mmap
-        log_flip_ratio = np.log(flip_ratio_i)
+        
+        #N_singularities[idx_L] = np.sum(denominator < eps)/2**L
+        
+        # Ignore division-by-zero warnings, allowing np.inf and np.nan to be created naturally
+        with np.errstate(divide='ignore', invalid='ignore'):
+            flip_ratio_i = numerator / denominator
+            log_flip_ratio = np.log10(flip_ratio_i)
+            
         mask = np.isfinite(log_flip_ratio)
 
+        # Save the full array (including infs and NaNs) to the memory map
         log_flip_ratio_file[idx_t] = log_flip_ratio
-        N_singularities[idx_t] = np.sum(mask != True)/2**L
         
-        log_flip_ratio = log_flip_ratio[mask]
-        
-        # Compute histogram of log(flip_ratio_i)
-        counts, bin_edges = np.histogram(log_flip_ratio, bins=100, density=True)
+        # Save the fraction of singular (non-finite) states
 
-        # Save histogram data arrays (.npz) incorporating parameter names
+        # Filter for histograms
+        log_flip_ratio_finite = log_flip_ratio[mask]
+        
+        if len(log_flip_ratio_finite) > 0:
+            counts, bin_edges = np.histogram(log_flip_ratio_finite, bins="auto", density=True)
+        else:
+            counts, bin_edges = np.array([]), np.array([])
+
         hist_data_filename = os.path.join(
             output_dir, 
             f"hist_data_L{L}_t{idx_t}_gi{gi:.2f}_gf{gf:.2f}.npz"
         )
         np.savez(hist_data_filename, counts=counts, bin_edges=bin_edges)
 
-        # Save histogram plot figure (.png)
-        plt.figure(figsize=(8, 5))
-        plt.hist(log_flip_ratio, bins=100, density=True, alpha=0.75, color='teal', edgecolor='black')
-        plt.title(f"Histogram of log(flip_ratio) [L={L}, t={idx_t*dt:.2f}, gi={gi}, gf={gf}]")
-        plt.xlabel("log(flip_ratio)")
-        plt.ylabel("Density")
-        plt.grid(True, linestyle="--", alpha=0.5)
+        log_psi = np.sort(log_flip_ratio_file[idx_t])
+        cum_log_psi = np.arange(1,2**L+1,1)/2**L
         
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+        # --- Subplot 1: Histogram ---
+        if len(log_flip_ratio_finite) > 0:
+            ax1.hist(log_flip_ratio_finite, bins=100, density=True, alpha=0.75, color='teal', edgecolor='black')
+        ax1.set_title(r"Histogram $\log_{10}(|\psi(s')/ \psi(s)|)$")
+        ax1.set_xlabel(r"$\log_{10}(|\psi(s')/ \psi(s)|)$")
+        ax1.set_ylabel("Density")
+        ax1.grid(True, linestyle="--", alpha=0.5)
+
+        # --- Subplot 2: Cumulative Plot ---
+        ax2.plot(log_psi, cum_log_psi, linestyle="dashed", color='darkorange')
+        ax2.set_title(r"Cumulative $\log_{10}(|\psi(s')/ \psi(s)|)$")
+        ax2.set_xlabel(r"$\log_{10}(|\psi(s')/ \psi(s)|)$")
+        ax2.set_ylabel("Cumulative Density")
+        ax2.grid(True, linestyle="--", alpha=0.5)
+        ax2.set_yscale("log")
+        # Overall title for parameters
+        fig.suptitle(rf"$L={L}, t={idx_t*dt:.2f}, gi={gi}, gf={gf}$", fontsize=14)
+        plt.tight_layout()
+
         plot_filename = os.path.join(
-            output_dir, 
+            output_dir,
             f"hist_plot_L{L}_t{idx_t}_gi{gi:.2f}_gf{gf:.2f}.png"
         )
         plt.savefig(plot_filename, dpi=300)
-        plt.close()
+        plt.close(fig)
+        
+        #plt.figure(figsize=(8, 5))
+        #if len(log_flip_ratio_finite) > 0:
 
-    N_singularities.flush()
+        #    plt.hist(log_flip_ratio_finite, bins=100, density=True, alpha=0.75, color='teal', edgecolor='black')
+        #    plt.plot(log_psi,cum_log_psi,linestyle="dashed")
+            
+        #plt.title(r"Histogram $\log_{10}"+rf"(|\psi(s^')/ \psi(s)|)\;[L={L}, t={idx_t*dt:.2f}, gi={gi}, gf={gf}]$")
+        #plt.xlabel(r"$\log_{10}(|\psi(s^')/ \psi(s)|)$")
+        #plt.ylabel("Density")
+        #plt.grid(True, linestyle="--", alpha=0.5)
+        #
+        #plot_filename = os.path.join(
+        #    output_dir, 
+        #    f"hist_plot_L{L}_t{idx_t}_gi{gi:.2f}_gf{gf:.2f}.png"
+        #)
+        #plt.savefig(plot_filename, dpi=300)
+        #plt.close()
+
+    #N_singularities.flush()
     log_flip_ratio_file.flush()
-    # No need to flush psi_history since it's loaded in 'r' (read-only) mode
     del psi_history
     del log_flip_ratio_file
-    del N_singularities
+    #del N_singularities
     print("Completed histograms for L =", L)
