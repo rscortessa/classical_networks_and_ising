@@ -1,34 +1,31 @@
 #!/usr/bin/env python
-# coding: utf-8
 
 import os
 import argparse
+
 # 1. Restrict threads BEFORE importing netket/jax/numpy
 os.environ["OMP_NUM_THREADS"] = "2"
 os.environ["OPENBLAS_NUM_THREADS"] = "2"
 os.environ["MKL_NUM_THREADS"] = "2"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "2"
 os.environ["NUMEXPR_NUM_THREADS"] = "2"
-# Tell JAX to use exactly 2 threads for its CPU operations
 os.environ["XLA_FLAGS"] = "--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=2"
 
 import numpy as np
 import netket as nk
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from scipy.sparse.linalg import eigsh,expm_multiply
-import sys
-
-# sys.path.append("../netket_with_NQS")
-# from class_WF import rotated_IsingModel
 
 
 def Fast_Hadamard(a):
-    ordering = 1.0    
+    """
+    Computes the Walsh-Hadamard Transform:
+    f_hat(A) = (1 / 2^N) * sum_s f(s) X_A(s)
+    Inverse is: f(s) = 2^N * Fast_Hadamard(f_hat)
+    """
+    ordering = 1.0
     a = a.copy()
     L = a.shape[-1]
     h = 1
-    
+
     while h < L:
         a2 = a.reshape(a.shape[:-1] + (L // (2 * h), 2, h))
         x = a2[..., 0, :]
@@ -43,154 +40,104 @@ def Fast_Hadamard(a):
     return a
 
 
-def sweeps(target_psi, psi, nstates, hi, past_inf, L, idx_groups, ngroups, continuous=False):
+def sweeps_KL(target_psi, psi, nstates, hi, past_kl, L, idx_groups, ngroups, continuous=False):
     batch_dims = target_psi.shape[:-1]
 
-    # We only need the WHT once to precompute the exponent matrices
-    wht_log_psi = Fast_Hadamard(np.log(psi))
-
-    print("Precomputing exponent matrices for all groups...")
-    exp_minus_E = np.zeros((ngroups, nstates), dtype=float)
-    exp_minus_2E = np.zeros((ngroups, nstates), dtype=float)
-
-    for i, idxs_group in enumerate(idx_groups):
-        V = np.zeros(nstates, dtype=wht_log_psi.dtype)
-        for g in idxs_group:
-            V[g] = wht_log_psi[g]
-
-        E = Fast_Hadamard(V) * nstates
-        exp_minus_E[i] = np.exp(-E)
-        exp_minus_2E[i] = np.exp(-2 * E)
-
-    infs = np.ones(batch_dims + (ngroups,), dtype=float)
-    order = np.ones(batch_dims + (ngroups,), dtype=int)
-
-  
-    active_mask = np.ones(ngroups, dtype=bool)
-    global_idx_array_group = np.arange(0,ngroups,dtype=int)
-    # Maintain the state directly in real space
-    current_psi = psi.copy()
-
-    # Sweep exactly ngroups times
-    for kk in range(ngroups):
-        # 1. A_real and C_real are calculated instantly in real space (NO transforms needed)
-        A_real = target_psi * current_psi
-        C_real = current_psi ** 2
-
-        # 2. SIMULTANEOUS EVALUATION: Evaluate all groups instantly
-        sum_a_0 = np.dot(exp_minus_E[active_mask], A_real)
-        sum_c_0 = np.dot(exp_minus_2E[active_mask], C_real)
-
-        overlap_sq = sum_a_0**2
-        norm_sq = sum_c_0
-
-        group_infs = 1.0 - (overlap_sq / norm_sq)
-
-        # 3. Find the best candidate
-        if not continuous:
-            best_idx = np.argmin(group_infs, axis=-1)
-        else:
-            diff = np.abs(past_inf - group_infs)
-            best_idx = np.argmin(diff, axis=-1)
-
-        # 4. Apply the exact multi-state update via real-space multiplication!
-        # This completely replaces the `deleting_group` function and the internal transforms.
-        current_psi = current_psi * exp_minus_E[best_idx]
-        best_inf = group_infs[best_idx]
-        
-        global_idx_group = global_idx_array_group[active_mask][best_idx]
-        chosen_group = idx_groups[global_idx_group]
-
-        active_mask[global_idx_group] = False
-
-        
-  
-        infs[..., kk] = best_inf
-        order[..., kk] = chosen_group[0]
-        past_inf = best_inf
-
-    return infs, order
-
-def sweeps(target_psi, psi, nstates, hi, past_inf, L, idx_groups, ngroups, continuous=False):
-    batch_dims = target_psi.shape[:-1]
-
-    # Ensure initial wavefunctions are strictly normalized in real space
+    # Ensure initial wavefunctions are strictly positive and normalized in real space
+    target_psi = np.abs(target_psi)
     target_psi = target_psi / np.sqrt(np.sum(target_psi ** 2))
+
+    psi = np.abs(psi)
     psi = psi / np.sqrt(np.sum(psi ** 2))
 
-    # We only need the WHT once to precompute the exponent matrices
-    wht_log_psi = Fast_Hadamard(np.log(psi))
+    # Target probability P(s) = |target_psi(s)|^2 and its WHT: P_hat(A) = <X_A> / 2^N
+    P_target = target_psi ** 2
+    wht_P_target = Fast_Hadamard(P_target)
 
-    print("Precomputing exponent matrices for all groups...")
-    exp_minus_E = np.zeros((ngroups, nstates), dtype=float)
+    # WHT of log(|psi(s)|): C_A^R = (1 / 2^N) * sum_s X_A(s) log|psi(s)|
+    eps = 1e-16
+    wht_log_psi = Fast_Hadamard(np.log(np.maximum(psi, eps)))
+
+    print("Precomputing WHT KL contributions and exponent matrices for all groups...")
     exp_minus_2E = np.zeros((ngroups, nstates), dtype=float)
+    group_kl_non_vac = np.zeros(ngroups, dtype=float)
 
     for i, idxs_group in enumerate(idx_groups):
         V = np.zeros(nstates, dtype=wht_log_psi.dtype)
         for g in idxs_group:
-            # Optional safeguard: if g == 0 is in a group, its WHT value is just the global norm offset.
-            # Keeping it or setting V[0] = 0 prevents exp(-E) from blowing up numerically.
+            # Exclude vacuum A = 0 from non-vacuum terms; A = 0 is handled by normalization
             if g != 0:
                 V[g] = wht_log_psi[g]
 
-        E = Fast_Hadamard(V) * nstates
-        # Subtract the mean of E to prevent exponential overflow/underflow; 
-        # a constant shift in E cancels out in (overlap_sq / norm_sq)
-        E_shifted = E - np.mean(E)
-        exp_minus_E[i] = np.exp(-E_shifted)
-        exp_minus_2E[i] = np.exp(-2 * E_shifted)
+        # Non-vacuum KL contribution for deleting group i:
+        # Since log(|psi(s)|^2 / |phi(s)|^2) = 2^(N+1) * sum_A Delta_A X_A(s)
+        # where Delta_A = C_A^psi - C_A^phi, deleting group i sets C_A^phi = 0 (Delta_A = C_A^psi).
+        # Contribution: sum_{A in group_i} 2^(2N+1) * P_hat(A) * C_A^psi
+        group_kl_non_vac[i] = (2.0 * (nstates)) * np.sum(wht_P_target * V)
 
-    infs = np.ones(batch_dims + (ngroups,), dtype=float)
-    order = np.ones(batch_dims + (ngroups,), dtype=int)
+        # Real-space exponent E_i(s) = 2^N * sum_{A in group_i} C_A^psi * X_A(s)
+        E = Fast_Hadamard(V) * nstates
+
+        # Subtract mean(E) for numerical stability before exponentiating
+        E_mean = np.mean(E)
+        E_shifted = E - E_mean
+        exp_minus_2E[i] = np.exp(-2.0 * E_shifted)
+
+        # Compensate for the shift -2 * E_mean in the log-normalization term
+        group_kl_non_vac[i] -= 2.0 * E_mean
+
+    kls = np.zeros(batch_dims + (ngroups,), dtype=float)
+    order = np.zeros(batch_dims + (ngroups,), dtype=int)
 
     active_mask = np.ones(ngroups, dtype=bool)
     global_idx_array_group = np.arange(0, ngroups, dtype=int)
+
+    # Maintain current normalized probability distribution |phi(s)|^2 in real space
+    current_prob = (psi ** 2).copy()
     
-    # Maintain the state directly in real space
-    current_psi = psi.copy()
+    # If target_psi == psi initially, initial KL is 0. 
+    # Otherwise, compute exact initial KL offset:
+    accum_total_kl = float(np.sum(P_target * np.log(np.maximum(P_target, eps) / np.maximum(current_prob, eps))))
 
     # Sweep exactly ngroups times
     for kk in range(ngroups):
-        # 1. A_real and C_real are calculated instantly in real space
-        A_real = target_psi * current_psi
-        C_real = current_psi ** 2
+        # 1. Incremental vacuum contribution: log( sum_s P_current(s) * exp(-2 E_g(s)) )
+        norm_sq = np.dot(exp_minus_2E[active_mask], current_prob)
+        delta_vacuum_kl = np.log(norm_sq)
 
-        # 2. SIMULTANEOUS EVALUATION: Evaluate all active groups instantly
-        sum_a_0 = np.dot(exp_minus_E[active_mask], A_real)
-        sum_c_0 = np.dot(exp_minus_2E[active_mask], C_real)
-
-        overlap_sq = sum_a_0 ** 2
-        norm_sq = sum_c_0
-
-        # Since target_psi is normalized, 1 - overlap_sq / norm_sq is exact
-        group_infs = 1.0 - (overlap_sq / norm_sq)
+        # 2. Exact candidate KL for each active group (NO clamping before updating accum_total_kl!)
+        raw_group_kls = accum_total_kl + group_kl_non_vac[active_mask] + delta_vacuum_kl
 
         # 3. Find the best candidate among active groups
         if not continuous:
-            best_idx = np.argmin(group_infs, axis=-1)
+            best_idx = np.argmin(raw_group_kls, axis=-1)
         else:
-            diff = np.abs(past_inf - group_infs)
+            diff = np.abs(past_kl - raw_group_kls)
             best_idx = np.argmin(diff, axis=-1)
 
-        # Map local best_idx to global group index FIRST
+        # Map local best_idx to global group index
         global_idx_group = global_idx_array_group[active_mask][best_idx]
         chosen_group = idx_groups[global_idx_group]
-        best_inf = group_infs[best_idx]
+        
+        # Keep the un-clamped value for the exact running accumulation
+        exact_best_kl = raw_group_kls[best_idx]
+        accum_total_kl = exact_best_kl
 
-        # 4. Apply the exact multi-state update using the GLOBAL index
-        current_psi = current_psi * exp_minus_E[global_idx_group]
-        # Renormalize current_psi at each step to prevent floating-point drift
-        current_psi /= np.sqrt(np.sum(current_psi ** 2))
+        # 4. Update the state probability in real space and renormalize
+        current_prob = current_prob * exp_minus_2E[global_idx_group]
+        current_prob /= np.sum(current_prob)
 
         active_mask[global_idx_group] = False
 
-        infs[..., kk] = best_inf
+        # Clean tiny negative machine-precision noise (e.g. -1e-16) only when storing
+        clean_best_kl = max(0.0, float(exact_best_kl))
+        kls[..., kk] = clean_best_kl
         order[..., kk] = chosen_group[0]
-        past_inf = best_inf
+        past_kl = clean_best_kl
 
-    return infs, order
+    return kls, order
 
-# Initial parameters ....
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--L", type=int, default=14)
@@ -203,7 +150,6 @@ if __name__ == "__main__":
     args, _ = parser.parse_known_args()
     params = vars(args)
 
-    eps = 1e-16
     dt = 0.01
     Ndt = 100
 
@@ -214,97 +160,83 @@ if __name__ == "__main__":
     angle = params["angle"]
     t_start = params["t_start"]
     pbc = True
-    
+
     hi = nk.hilbert.Spin(s=1/2, N=L, inverted_ordering=True)
     add = ""
     if pbc:
         add += "_pbc"
     if angle != 0.0:
         add += "_" + str(angle)
-        initial_mask = np.ones(2**L, dtype=int)
-    else:
-        initial_mask = np.prod(hi.all_states(),axis=-1) > 0
-
-    len_mask = np.sum(initial_mask)
 
     output_dir = "wavefunctions_data" + add
     os.makedirs(output_dir, exist_ok=True)
 
     base_name = f"wavefunctions_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}Nt{Ndt}.npy"
     filename = os.path.join(output_dir, base_name)
-    
+
     try:
         psi_history = np.lib.format.open_memmap(
-                filename, 
-                mode='r+', 
-                dtype=np.complex128, 
-                shape=(Ndt+1, 2**L)
+            filename,
+            mode='r+',
+            dtype=np.complex128,
+            shape=(Ndt + 1, 2**L)
         )
         psi_t_idx = psi_history[t_idx]
         print(f"Loaded target wavefunction shape: {psi_t_idx.shape}")
     except FileNotFoundError:
-        # Dummy data for testing if file is missing
         print(f"Warning: {filename} not found. Generating dummy target wavefunction.")
         psi_t_idx = np.ones(2**L, dtype=np.complex128) / np.sqrt(2**L)
 
     continuous_list = [False, True]
 
-
-
-    # In your main script, replace the group_equivalent_states() call with:
-    local_filename = os.path.join(output_dir,f"groups_local_L{L}_a{angle}.npy")
-    global_filename = os.path.join(output_dir,f"groups_global_L{L}_a{angle}.npy")
+    local_filename = os.path.join(output_dir, f"groups_local_L{L}_a{angle}.npy")
+    global_filename = os.path.join(output_dir, f"groups_global_L{L}_a{angle}.npy")
 
     if not os.path.exists(global_filename):
         raise FileNotFoundError(f"Missing {global_filename}. Run generate_groups.py first.")
 
-    # Load the dense 2D arrays
     dense_groups_local = np.load(local_filename)
     dense_groups_global = np.load(global_filename)
 
-    
     for continuous in continuous_list:
-
         ngroups = len(dense_groups_global)
-        
-        # Since your algorithm uses `idx_groups.pop()`, convert the dense array back to a list of lists 
-        # while filtering out the -1 padding:
         idx_groups = [g[g != -1].tolist() for g in dense_groups_global]
-        print(idx_groups)
         exact = np.abs(psi_t_idx)
-        
-        past_inf = 0.0
-        inf_exact, order_exact = sweeps(exact, exact, 2**L, hi, past_inf, L, idx_groups,ngroups,continuous=continuous)
-       
-        print(f"Continuous={continuous}: Infs shape {inf_exact.shape}, Order shape {order_exact.shape}")
-        
-        base_name_inf = f"inf_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}C{continuous}.npy"
-        filename_inf = os.path.join(output_dir, base_name_inf)
-        
-        # Save lengths matching the number of groups, not len_mask
-        ngroups = inf_exact.shape[-1]
-        psi_inf = np.lib.format.open_memmap(
-            filename_inf, 
-            mode='w+', 
-            dtype=np.complex128, 
+
+        past_kl = 0.0
+        kl_exact, order_exact = sweeps_KL(
+            exact, exact, 2**L, hi, past_kl, L, idx_groups, ngroups, continuous=continuous
+        )
+
+        print(f"Continuous={continuous}: KLs shape {kl_exact.shape}, Order shape {order_exact.shape}")
+
+        base_name_kl = f"kl_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}C{continuous}.npy"
+        filename_kl = os.path.join(output_dir, base_name_kl)
+
+        ngroups = kl_exact.shape[-1]
+        psi_kl = np.lib.format.open_memmap(
+            filename_kl,
+            mode='w+',
+            dtype=np.complex128,  # Kept complex128 to match baseline script format
             shape=(ngroups,)
         )
-        psi_inf[:] = inf_exact[::-1]
+        psi_kl[:] = kl_exact[::-1]
 
-        base_name_sort = f"sort_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}C{continuous}.npy"
+        base_name_sort = f"sort_KL_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}C{continuous}.npy"
         filename_sort = os.path.join(output_dir, base_name_sort)
         psi_sort = np.lib.format.open_memmap(
-            filename_sort, 
-            mode='w+', 
-            dtype=int, 
+            filename_sort,
+            mode='w+',
+            dtype=int,
             shape=(ngroups,)
         )
         psi_sort[:] = order_exact[::-1]
         print(order_exact)
+
         psi_sort.flush()
-        psi_inf.flush()
+        psi_kl.flush()
         del psi_sort
-        del psi_inf
+        del psi_kl
 
     if 'psi_history' in locals():
         psi_history.flush()
