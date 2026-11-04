@@ -26,7 +26,7 @@ for t_idx in ts:
     #plt.yscale('log')
     plt.ylim([1e-11,1.1])
     plt.xlabel(r'$n_c/L$')
-    #plt.xlim([0,2.1])
+    plt.xlim([0,5])
     plt.ylabel('fidelity')
     plt.title(f'fidelity vs Parameters | $g_i$={gi}, $g_f$={gf}, angle={angle}, t={t:.2f}')
     plt.grid(True, which="both", linestyle="--", alpha=0.6)
