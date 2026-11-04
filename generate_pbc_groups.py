@@ -91,7 +91,7 @@ if __name__ == "__main__":
     dense_local, dense_global = group_equivalent_states(L, hi, states, pad_to_dense=True)
     #print(dense_local)
     #print(dense_local[1])
-    #print(dense_global[:,:15])
+    print(dense_global[:,:15])
     local_filename = f"groups_local_L{L}_a{angle}.npy"
     global_filename = f"groups_global_L{L}_a{angle}.npy"
 

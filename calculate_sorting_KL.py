@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 import os
 import argparse
 
@@ -60,7 +59,8 @@ def sweeps_KL(target_psi, psi, nstates, hi, past_kl, L, idx_groups, ngroups, con
 
     print("Precomputing WHT KL contributions and exponent matrices for all groups...")
     exp_minus_2E = np.zeros((ngroups, nstates), dtype=float)
-    group_kl_non_vac = np.zeros(ngroups, dtype=float)
+    group_kl_linear = np.zeros(ngroups, dtype=float)
+    group_E_mean = np.zeros(ngroups, dtype=float)
 
     for i, idxs_group in enumerate(idx_groups):
         V = np.zeros(nstates, dtype=wht_log_psi.dtype)
@@ -69,24 +69,22 @@ def sweeps_KL(target_psi, psi, nstates, hi, past_kl, L, idx_groups, ngroups, con
             if g != 0:
                 V[g] = wht_log_psi[g]
 
-        # Non-vacuum KL contribution for deleting group i:
-        # Since log(|psi(s)|^2 / |phi(s)|^2) = 2^(N+1) * sum_A Delta_A X_A(s)
-        # where Delta_A = C_A^psi - C_A^phi, deleting group i sets C_A^phi = 0 (Delta_A = C_A^psi).
-        # Contribution: sum_{A in group_i} 2^(2N+1) * P_hat(A) * C_A^psi
-        group_kl_non_vac[i] = (2.0 * (nstates)) * np.sum(wht_P_target * V)
+        # Pure linear (non-vacuum) KL contribution for deleting group i:
+        # sum_{A in group_i} 2^(2N+1) * P_hat(A) * C_A^psi
+        group_kl_linear[i] = (2.0 * nstates) * np.sum(wht_P_target * V)
 
         # Real-space exponent E_i(s) = 2^N * sum_{A in group_i} C_A^psi * X_A(s)
         E = Fast_Hadamard(V) * nstates
 
         # Subtract mean(E) for numerical stability before exponentiating
-        E_mean = np.mean(E)
+        E_mean = float(np.mean(E))
+        group_E_mean[i] = E_mean
         E_shifted = E - E_mean
         exp_minus_2E[i] = np.exp(-2.0 * E_shifted)
 
-        # Compensate for the shift -2 * E_mean in the log-normalization term
-        group_kl_non_vac[i] -= 2.0 * E_mean
-
     kls = np.zeros(batch_dims + (ngroups,), dtype=float)
+    kls_linear = np.zeros(batch_dims + (ngroups,), dtype=float)
+    kls_vacuum = np.zeros(batch_dims + (ngroups,), dtype=float)
     order = np.zeros(batch_dims + (ngroups,), dtype=int)
 
     active_mask = np.ones(ngroups, dtype=bool)
@@ -94,19 +92,23 @@ def sweeps_KL(target_psi, psi, nstates, hi, past_kl, L, idx_groups, ngroups, con
 
     # Maintain current normalized probability distribution |phi(s)|^2 in real space
     current_prob = (psi ** 2).copy()
-    
-    # If target_psi == psi initially, initial KL is 0. 
+
+    # If target_psi == psi initially, initial KL is 0.
     # Otherwise, compute exact initial KL offset:
     accum_total_kl = float(np.sum(P_target * np.log(np.maximum(P_target, eps) / np.maximum(current_prob, eps))))
+    accum_linear_kl = 0.0
+    accum_vacuum_kl = accum_total_kl
 
     # Sweep exactly ngroups times
     for kk in range(ngroups):
-        # 1. Incremental vacuum contribution: log( sum_s P_current(s) * exp(-2 E_g(s)) )
+        # 1. Incremental vacuum (non-linear) contribution:
+        # log( sum_s P_current(s) * exp(-2 E_g(s)) ) = log(norm_sq) - 2 * E_mean
         norm_sq = np.dot(exp_minus_2E[active_mask], current_prob)
-        delta_vacuum_kl = np.log(norm_sq)
+        delta_vacuum_kl = np.log(norm_sq) - 2.0 * group_E_mean[active_mask]
 
-        # 2. Exact candidate KL for each active group (NO clamping before updating accum_total_kl!)
-        raw_group_kls = accum_total_kl + group_kl_non_vac[active_mask] + delta_vacuum_kl
+        # 2. Exact candidate KL for each active group (linear + vacuum)
+        delta_linear_kl = group_kl_linear[active_mask]
+        raw_group_kls = accum_total_kl + delta_linear_kl + delta_vacuum_kl
 
         # 3. Find the best candidate among active groups
         if not continuous:
@@ -118,10 +120,12 @@ def sweeps_KL(target_psi, psi, nstates, hi, past_kl, L, idx_groups, ngroups, con
         # Map local best_idx to global group index
         global_idx_group = global_idx_array_group[active_mask][best_idx]
         chosen_group = idx_groups[global_idx_group]
-        
-        # Keep the un-clamped value for the exact running accumulation
-        exact_best_kl = raw_group_kls[best_idx]
+
+        # Update running accumulations for total, linear, and vacuum KL
+        exact_best_kl = float(raw_group_kls[best_idx])
         accum_total_kl = exact_best_kl
+        accum_linear_kl += float(delta_linear_kl[best_idx])
+        accum_vacuum_kl += float(delta_vacuum_kl[best_idx])
 
         # 4. Update the state probability in real space and renormalize
         current_prob = current_prob * exp_minus_2E[global_idx_group]
@@ -129,13 +133,16 @@ def sweeps_KL(target_psi, psi, nstates, hi, past_kl, L, idx_groups, ngroups, con
 
         active_mask[global_idx_group] = False
 
-        # Clean tiny negative machine-precision noise (e.g. -1e-16) only when storing
-        clean_best_kl = max(0.0, float(exact_best_kl))
+        # Clean tiny negative machine-precision noise on total KL only when storing
+        # (Note: linear and vacuum parts can individually be negative, so do NOT clamp them)
+        clean_best_kl = max(0.0, exact_best_kl)
         kls[..., kk] = clean_best_kl
+        kls_linear[..., kk] = accum_linear_kl
+        kls_vacuum[..., kk] = accum_vacuum_kl
         order[..., kk] = chosen_group[0]
         past_kl = clean_best_kl
 
-    return kls, order
+    return kls, kls_linear, kls_vacuum, order
 
 
 if __name__ == "__main__":
@@ -204,26 +211,51 @@ if __name__ == "__main__":
         exact = np.abs(psi_t_idx)
 
         past_kl = 0.0
-        kl_exact, order_exact = sweeps_KL(
+        kl_exact, kl_linear_exact, kl_vacuum_exact, order_exact = sweeps_KL(
             exact, exact, 2**L, hi, past_kl, L, idx_groups, ngroups, continuous=continuous
         )
 
-        print(f"Continuous={continuous}: KLs shape {kl_exact.shape}, Order shape {order_exact.shape}")
+        print(
+            f"Continuous={continuous}: KLs shape {kl_exact.shape}, "
+            f"Linear shape {kl_linear_exact.shape}, Vacuum shape {kl_vacuum_exact.shape}, "
+            f"Order shape {order_exact.shape}"
+        )
 
-        base_name_kl = f"kl_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}C{continuous}.npy"
-        filename_kl = os.path.join(output_dir, base_name_kl)
-
+        suffix = f"L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}C{continuous}.npy"
         ngroups = kl_exact.shape[-1]
+
+        # 1. Save total KL
+        filename_kl = os.path.join(output_dir, f"kl_{suffix}")
         psi_kl = np.lib.format.open_memmap(
             filename_kl,
             mode='w+',
-            dtype=np.complex128,  # Kept complex128 to match baseline script format
+            dtype=np.complex128,
             shape=(ngroups,)
         )
         psi_kl[:] = kl_exact[::-1]
 
-        base_name_sort = f"sort_KL_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}t{t_idx}Nt{Ndt}C{continuous}.npy"
-        filename_sort = os.path.join(output_dir, base_name_sort)
+        # 2. Save linear (non-vacuum) part of KL
+        filename_kl_lin = os.path.join(output_dir, f"kl_linear_{suffix}")
+        psi_kl_lin = np.lib.format.open_memmap(
+            filename_kl_lin,
+            mode='w+',
+            dtype=np.complex128,
+            shape=(ngroups,)
+        )
+        psi_kl_lin[:] = kl_linear_exact[::-1]
+
+        # 3. Save vacuum (non-linear) part of KL
+        filename_kl_vac = os.path.join(output_dir, f"kl_vacuum_{suffix}")
+        psi_kl_vac = np.lib.format.open_memmap(
+            filename_kl_vac,
+            mode='w+',
+            dtype=np.complex128,
+            shape=(ngroups,)
+        )
+        psi_kl_vac[:] = kl_vacuum_exact[::-1]
+
+        # 4. Save sorting order
+        filename_sort = os.path.join(output_dir, f"sort_KL_{suffix}")
         psi_sort = np.lib.format.open_memmap(
             filename_sort,
             mode='w+',
@@ -233,10 +265,14 @@ if __name__ == "__main__":
         psi_sort[:] = order_exact[::-1]
         print(order_exact)
 
-        psi_sort.flush()
         psi_kl.flush()
-        del psi_sort
+        psi_kl_lin.flush()
+        psi_kl_vac.flush()
+        psi_sort.flush()
         del psi_kl
+        del psi_kl_lin
+        del psi_kl_vac
+        del psi_sort
 
     if 'psi_history' in locals():
         psi_history.flush()

@@ -270,7 +270,7 @@ if __name__ == "__main__":
         # Since your algorithm uses `idx_groups.pop()`, convert the dense array back to a list of lists 
         # while filtering out the -1 padding:
         idx_groups = [g[g != -1].tolist() for g in dense_groups_global]
-
+        print(idx_groups)
         exact = np.abs(psi_t_idx)
         
         past_inf = 0.0
@@ -300,7 +300,7 @@ if __name__ == "__main__":
             shape=(ngroups,)
         )
         psi_sort[:] = order_exact[::-1]
-
+        print(order_exact)
         psi_sort.flush()
         psi_inf.flush()
         del psi_sort

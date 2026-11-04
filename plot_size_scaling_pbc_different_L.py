@@ -58,8 +58,8 @@ def main():
                 #print(rep_to_size)
 
                             
-                inf_file = os.path.join(output_dir, f"kl_L{L}gi{args.gi:.2f}gf{args.gf:.2f}ti{args.t_start}dt{args.dt}t{t_idx}Nt{args.Ndt}C{continuous}.npy")
-                sort_file = os.path.join(output_dir, f"sort_KL_L{L}gi{args.gi:.2f}gf{args.gf:.2f}ti{args.t_start}dt{args.dt}t{t_idx}Nt{args.Ndt}C{continuous}.npy")
+                inf_file = os.path.join(output_dir, f"inf_L{L}gi{args.gi:.2f}gf{args.gf:.2f}ti{args.t_start}dt{args.dt}t{t_idx}Nt{args.Ndt}C{continuous}.npy")
+                sort_file = os.path.join(output_dir, f"sort_L{L}gi{args.gi:.2f}gf{args.gf:.2f}ti{args.t_start}dt{args.dt}t{t_idx}Nt{args.Ndt}C{continuous}.npy")
 
                 if not os.path.exists(inf_file) or not os.path.exists(sort_file):
                     print(f"Warning: Missing data files for Continuous={continuous}. Skipping...")
@@ -76,11 +76,9 @@ def main():
                 x_cumulative_removed = np.cumsum(group_sizes)[:-1]
 
                 mask =  x_cumulative_removed/2**L > 1/2 
-
-                print(infs[mask[]])
                 
                 # 4. Plot
-                plt.plot(x_cumulative_removed/2**L, infs, marker='.', markersize=4, label=f'{L}')
+                plt.plot(x_cumulative_removed/L, infs/L**1.7, marker='.', markersize=4, label=f'{L}')
 
             plt.xlabel(r"$n_c/n_{states}$")
             plt.ylabel("KL")

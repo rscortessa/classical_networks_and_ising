@@ -23,6 +23,7 @@ import os
 sys.path.append("../netket_with_NQS")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.cm as cm
 
 def Fast_Hadamard(a):
     ordering = 1.0    
@@ -98,8 +99,11 @@ psi_ratio = np.lib.format.open_memmap(
 )
 
 plt.figure()
+plt.title(r"$|C_{i+1}/C_{i}|$ ratio between coefficients"+"\n"+rf"$L={L}, gi={gi}, gf={gf}$", fontsize=14)
 
-for t_idx in [40,41,42,43,44,46,47,48,49,51,52,53,54,56,57,58,59,61,62,63,64,66,67,68,69,71,72,73,74]:#range(Ndt+1):
+cmap = cm.viridis  # Or 'plasma', 'coolwarm', 'inferno', etc.
+norm = mcolors.Normalize(vmin=0, vmax=Ndt)
+for t_idx in [0,10,40,60,100]:#range(Ndt+1):
     base_name = f"wavefunctions_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}Nt{Ndt}.npy"
     filename = os.path.join(output_dir, base_name)
 
@@ -140,16 +144,25 @@ for t_idx in [40,41,42,43,44,46,47,48,49,51,52,53,54,56,57,58,59,61,62,63,64,66,
     
     safety_number = np.sum(log_sorting > eps)
     
-    psi_ratio[t_idx,:safety_number-1,1] = np.abs(log_sorting[:safety_number-1].real/log_sorting[1:safety_number].real)
+    psi_ratio[t_idx,:safety_number-1,1] = np.abs(log_sorting[1:safety_number].real/log_sorting[:safety_number-1].real)
     psi_ratio[t_idx,safety_number-1:,1] = 0.0
     
     print("ratio")
     print(psi_ratio[t_idx,:safety_number-1,0])
         
 
+    indices = np.arange(safety_number-1)
+    plt.scatter(indices,psi_ratio[t_idx,:safety_number-1,1],color=cmap(norm(t_idx)))
 
-    plt.plot(1/psi_ratio[t_idx,:safety_number-1,1])
+    
 
+sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+sm.set_array([])
+plt.colorbar(sm, ax=plt.gca(), label="$t$")
+plt.xlim([0,100])
+    
+plt.ylabel(r"$|C_{i+1}/C_i|$")
+plt.xlabel(r"$i\;index$")
 plt.yscale("log")
 plt.ylim([1e-4,10])
 plt.savefig("ratio_series_L"+str(L)+"gi"+str(gi)+"gf"+str(gf)+"angle"+str(angle)+".png")

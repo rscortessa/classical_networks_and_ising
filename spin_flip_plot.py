@@ -28,7 +28,7 @@ gi = 1.5
 gf = 0.5
 angle=0.0
 i=2
-eps = 1e-16
+eps = 1e-10
 
 t_start = 0.0
 dt = 0.01
@@ -42,10 +42,18 @@ if pbc:
 time = t_start+np.arange(Ndt+1)*dt
 output_dir = "wavefunctions_data"+add
 os.makedirs(output_dir, exist_ok=True)
+singularities_filename = os.path.join(output_dir, f"singularities_gi{gi:.2f}_gf{gf:.2f}eps{eps=}.npy")
+N_singularities = np.lib.format.open_memmap(
+     singularities_filename,
+     mode='w+',
+     dtype=np.float64, 
+     shape=(len(Ls),Ndt+1,)
+    )
 
 
 
 prob_spin_flip_i = np.ones((len(Ls),Ndt+1))
+
 
 for idx_L,L in enumerate(Ls):
     hi = nk.hilbert.Spin(s=1/2,N=L,inverted_ordering=True)
@@ -65,8 +73,12 @@ for idx_L,L in enumerate(Ls):
         dtype=np.complex128,
         shape=(Ndt+1,2**L)
     )
+    
 
     for idx_t in range(Ndt+1):
+    
+        
+        N_singularities[idx_L,idx_t] = np.sum(np.abs(psi_history[idx_t]) < eps)/2**L
         flip_ratio_i = np.abs(psi_history[idx_t,single_flip_numbers]/(psi_history[idx_t]+eps))
         prob_spin_flip_i[idx_L,idx_t] = np.mean(flip_ratio_i)
 

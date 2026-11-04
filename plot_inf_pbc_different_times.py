@@ -64,8 +64,8 @@ def main():
     
             
             
-            inf_file = os.path.join(output_dir, f"inf_L{L}gi{args.gi:.2f}gf{args.gf:.2f}ti{args.t_start}dt{args.dt}t{t_idx}Nt{args.Ndt}C{continuous}.npy")
-            sort_file = os.path.join(output_dir, f"sort_L{L}gi{args.gi:.2f}gf{args.gf:.2f}ti{args.t_start}dt{args.dt}t{t_idx}Nt{args.Ndt}C{continuous}.npy")
+            inf_file = os.path.join(output_dir, f"kl_L{L}gi{args.gi:.2f}gf{args.gf:.2f}ti{args.t_start}dt{args.dt}t{t_idx}Nt{args.Ndt}C{continuous}.npy")
+            sort_file = os.path.join(output_dir, f"sort_KL_L{L}gi{args.gi:.2f}gf{args.gf:.2f}ti{args.t_start}dt{args.dt}t{t_idx}Nt{args.Ndt}C{continuous}.npy")
             
             if not os.path.exists(inf_file) or not os.path.exists(sort_file):
                 print(f"Warning: Missing data files for Continuous={continuous}. Skipping...")
@@ -86,21 +86,21 @@ def main():
             print(infs)
             
         plt.xlabel("$n_c$")
-        plt.ylabel("Infidelity")
+        plt.ylabel("KL")
         plt.ylim([1e-10,1])
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=plt.gca(), ticks=n_values/Ntimes)
         cbar.set_label(" time $t$")
         plt.yscale("log")
-        plt.title(f"Infidelity vs $n_c$ (L={L} t={t_idx*0.01} gi={args.gi}, gf={args.gf})")
+        plt.title(f"KL vs $n_c$ (L={L} t={t_idx*0.01} gi={args.gi}, gf={args.gf})")
         plt.yscale("log") # Infidelity usually drops logarithmically, so a log scale is helpful
         plt.grid(True, which="both", ls="--", alpha=0.5)
         plt.legend()
         plt.tight_layout()
     
         # Save the plot
-        plot_path = os.path.join(output_dir, f"inf_plot_L{args.L}_gi{args.gi}_gf_{args.gf}continuous{continuous}.png")
+        plot_path = os.path.join(output_dir, f"KL_plot_L{args.L}_gi{args.gi}_gf_{args.gf}continuous{continuous}.png")
         plt.savefig(plot_path, dpi=300)
         print(f"Plot saved successfully to {plot_path}")
     

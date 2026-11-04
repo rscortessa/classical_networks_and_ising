@@ -57,10 +57,10 @@ def Fast_Hadamard(a):
     return a
 
 
-L = 22
-gi = 0.0
-gf = 1.0
-angle=90.0
+L = 24
+gi = 1.5
+gf = 0.5
+angle=0.0
 
 eps = 1e-16
 

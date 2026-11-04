@@ -121,8 +121,10 @@ if __name__ == "__main__":
             psi_t = np.abs(psi_history[t_idx])
             psi_t /= np.sqrt(np.sum(psi_t ** 2))
             psi_t = psi_t**2
+            
             WHT = Fast_Hadamard(psi_t)
-            weights[idx_L,c_idx] = np.sum(np.abs(WHT[1:]))
+            print(WHT[0]*2**L)
+            weights[idx_L,c_idx] = np.sum(np.abs(WHT[1:]))*2**L
             
         axes[0,0].plot( np.array(t_idx_list)*0.01, weights[idx_L], color=colors[idx_L], lw=1.6, label=f"L={L}")
     

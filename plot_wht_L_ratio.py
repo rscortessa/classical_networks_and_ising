@@ -150,12 +150,13 @@ if __name__ == "__main__":
     if args.abs_ratio:
         ax.set_yscale("log")
     ax.grid(True, which="both", ls="--", alpha=0.4)
-    ax.legend(fontsize=8, ncol=2)
-    ax.set_xlim(-0.2,10)
+    ax.set_xlim(-0.2,15)
 
-    ax.axhline(y=1/gi,linestyle="dashed")
+    ax.axhline(1/gi,color="black",linestyle="dashed",label=r"$1/g_i$")
     
     fig.suptitle(rf"Ratio "+r"$|\frac{C_{i+1}}{C_{i}}|\cdot \frac{n_{i+1}}{n_{i}}$"+"\n"+rf" $( g_i={gi:.2f}, g_f={gf:.2f},t={t_idx*0.01:.2f})$", fontsize=13)
+    ax.legend(fontsize=8, ncol=2)
+
     plt.tight_layout()
 
     suffix = "_abs" if args.abs_ratio else "_signed"
