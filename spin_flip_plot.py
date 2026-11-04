@@ -1,14 +1,12 @@
+
 #!/usr/bin/env python
 # coding: utf-8
-
-# In[5]:
-
 
 
 import os
 
-# 1. Restrict threads BEFORE importing netket/jax/numpy
-os.environ["OMP_NUM_THREADS"] = "2" # Example: Restrict to 2 threads per node
+# 1. Restrict threads BEFORE importing netket/jax/numpy                                                                                                                                                                                     
+os.environ["OMP_NUM_THREADS"] = "2" # Example: Restrict to 2 threads per node                                                                                                                                                               
 os.environ["OPENBLAS_NUM_THREADS"] = "2"
 os.environ["MKL_NUM_THREADS"] = "2"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "2"
@@ -23,7 +21,7 @@ sys.path.append("../netket_with_NQS")
 
 
 
-Ls = [8]
+Ls = [8,10,12,14,16,18,20,22]
 gi = 1.5
 gf = 0.5
 angle=0.0
@@ -55,7 +53,6 @@ for idx_L,L in enumerate(Ls):
     single_flip_numbers = hi.states_to_numbers(flip_idx)
 
     flip_ratio_i = np.zeros(2**L)
-    
     base_name = f"wavefunctions_L{L}gi{gi:.2f}gf{gf:.2f}ti{t_start}dt{dt}Nt{Ndt}.npy"
 
     filename = os.path.join(output_dir, base_name)
@@ -73,9 +70,21 @@ for idx_L,L in enumerate(Ls):
     psi_history.flush()
     del psi_history
     print(gf)
+        filename,
+        mode='r+',
+        dtype=np.complex128,
+        shape=(Ndt+1,2**L)
+    )
+
+    for idx_t in range(Ndt+1):
+        flip_ratio_i = np.abs(psi_history[idx_t,single_flip_numbers]/(psi_history[idx_t]+eps))
+        prob_spin_flip_i[idx_L,idx_t] = np.mean(flip_ratio_i)
+
+    psi_history.flush()
+    del psi_history
+    print("done",L)
 flip_filename = os.path.join(output_dir,"flip_array.npy")
 np.save(flip_filename,prob_spin_flip_i)
-
 
 
 
